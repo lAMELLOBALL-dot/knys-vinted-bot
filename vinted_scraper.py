@@ -65,6 +65,7 @@ def get_seuil(titre):
     return SEUILS_BONNE_AFFAIRE["default"]
 
 def scrape_vinted(mot_cle):
+    global session
     resultats = []
     try:
         url = "https://www.vinted.fr/api/v2/catalog/items"
@@ -76,8 +77,6 @@ def scrape_vinted(mot_cle):
         resp = session.get(url, headers=HEADERS, params=params, timeout=15)
         
         if resp.status_code == 401 or resp.status_code == 403:
-            # Renouvelle la session
-            global session
             session = get_session_cookie()
             resp = session.get(url, headers=HEADERS, params=params, timeout=15)
 
