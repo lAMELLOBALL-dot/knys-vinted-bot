@@ -8,6 +8,8 @@ from apscheduler.schedulers.background import BackgroundScheduler
 app = Flask(__name__)
 CORS(app)
 
+SCRAPER_API_KEY = "7c1162adb095c7d643a96b4208f634d1"
+
 MOTS_CLES = [
     "nike air jordan",
     "adidas yeezy",
@@ -41,59 +43,23 @@ def get_seuil(titre):
             return seuil
     return SEUILS_BONNE_AFFAIRE["default"]
 
-def get_vinted_token():
-    """Récupère un token Vinted frais."""
-    try:
-        s = requests.Session()
-        s.headers.update({
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "Accept": "text/html,application/xhtml+xml",
-            "Accept-Language": "fr-FR,fr;q=0.9",
-        })
-        r = s.get("https://www.vinted.fr", timeout=15, allow_redirects=True)
-        cookies = dict(s.cookies)
-        return s, cookies
-    except Exception as e:
-        print(f"Erreur token: {e}")
-        return requests.Session(), {}
-
-session, cookies_store = get_vinted_token()
-
 def scrape_vinted(mot_cle):
-    global session, cookies_store
     resultats = []
     try:
-        url = "https://www.vinted.fr/api/v2/catalog/items"
-        params = {
-            "search_text": mot_cle,
-            "order": "newest_first",
-            "per_page": 20,
-            "currency": "EUR",
+        target_url = f"https://www.vinted.fr/api/v2/catalog/items?search_text={requests.utils.quote(mot_cle)}&order=newest_first&per_page=20"
+        
+        payload = {
+            "api_key": SCRAPER_API_KEY,
+            "url": target_url,
+            "country_code": "fr",
+            "render": "false",
         }
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-            "Accept": "application/json, text/plain, */*",
-            "Accept-Language": "fr-FR,fr;q=0.9,en;q=0.8",
-            "Referer": "https://www.vinted.fr/catalog",
-            "sec-ch-ua": '"Chromium";v="124", "Google Chrome";v="124"',
-            "sec-ch-ua-mobile": "?0",
-            "sec-ch-ua-platform": '"Windows"',
-            "sec-fetch-dest": "empty",
-            "sec-fetch-mode": "cors",
-            "sec-fetch-site": "same-origin",
-        }
-        resp = session.get(url, params=params, headers=headers, timeout=15)
+        
+        resp = requests.get("https://api.scraperapi.com/", params=payload, timeout=60)
         print(f"[{mot_cle}] Status: {resp.status_code}")
 
-        if resp.status_code in [401, 403, 429]:
-            print(f"[{mot_cle}] Renouvellement session...")
-            session, cookies_store = get_vinted_token()
-            time.sleep(3)
-            resp = session.get(url, params=params, headers=headers, timeout=15)
-            print(f"[{mot_cle}] Retry status: {resp.status_code}")
-
         if resp.status_code != 200:
-            print(f"[{mot_cle}] Echec final: {resp.status_code} - {resp.text[:200]}")
+            print(f"[{mot_cle}] Echec: {resp.text[:200]}")
             return []
 
         data = resp.json()
@@ -149,7 +115,7 @@ def run_scraping():
                 if item["bonne_affaire"]:
                     bonnes_affaires_temp.append(item)
                 nouvelles += 1
-        time.sleep(3)
+        time.sleep(2)
 
     bonnes_affaires = sorted(bonnes_affaires_temp, key=lambda x: x["date"], reverse=True)[:50]
     print(f"  -> {nouvelles} nouvelles | {len(bonnes_affaires)} bonnes affaires")
@@ -186,7 +152,7 @@ def manual_refresh():
     return jsonify({"status": "ok"})
 
 if __name__ == "__main__":
-    print("Knys VIP - Vinted Bot v4")
+    print("Knys VIP - Vinted Bot v5")
     run_scraping()
     scheduler = BackgroundScheduler()
     scheduler.add_job(run_scraping, "interval", minutes=INTERVALLE_SCRAPING_MINUTES)
