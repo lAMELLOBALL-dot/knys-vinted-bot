@@ -1,8 +1,3 @@
-"""
-Vinted Bot v2 — Knys VIP
-Utilise l'API officieuse de Vinted (bien plus fiable que le scraping HTML)
-"""
-
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 import requests
@@ -39,23 +34,32 @@ annonces_store = {}
 bonnes_affaires = []
 ids_vus = set()
 
+COOKIES = {
+    "anon_id": "ed318f89-2e7a-4ac2-ac2e-9b102e17151c",
+    "datadome": "OpqdQhpUI4GjrkKvbBv0EXS7nnVgbgXS6bmtiKMAeKgUkUWYQ3iXE8XULnM~9UV86ELavfLHW2AN5DnuBQBXNRU0p04G6aNKv~Z95VNE25fKZ~R7bWQT~l0BsO8N6TAl",
+    "user-locale": "fr",
+    "user-iso-locale": "fr-FR",
+    "_vinted_fr_session": "",
+}
+
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     "Accept": "application/json, text/plain, */*",
     "Accept-Language": "fr-FR,fr;q=0.9",
+    "Referer": "https://www.vinted.fr/",
     "X-Requested-With": "XMLHttpRequest",
 }
 
-def get_session_cookie():
-    """Récupère un cookie de session Vinted."""
-    try:
-        s = requests.Session()
-        s.get("https://www.vinted.fr", headers=HEADERS, timeout=10)
-        return s
-    except:
-        return requests.Session()
+session = requests.Session()
+session.headers.update(HEADERS)
+session.cookies.update(COOKIES)
 
-session = get_session_cookie()
+def refresh_session():
+    global session
+    try:
+        session.get("https://www.vinted.fr", timeout=10)
+    except:
+        pass
 
 def get_seuil(titre):
     titre_lower = titre.lower()
@@ -74,11 +78,11 @@ def scrape_vinted(mot_cle):
             "order": "newest_first",
             "per_page": 20,
         }
-        resp = session.get(url, headers=HEADERS, params=params, timeout=15)
-        
-        if resp.status_code == 401 or resp.status_code == 403:
-            session = get_session_cookie()
-            resp = session.get(url, headers=HEADERS, params=params, timeout=15)
+        resp = session.get(url, params=params, timeout=15)
+
+        if resp.status_code in [401, 403]:
+            refresh_session()
+            resp = session.get(url, params=params, timeout=15)
 
         if resp.status_code != 200:
             print(f"[{mot_cle}] Erreur {resp.status_code}")
@@ -89,10 +93,11 @@ def scrape_vinted(mot_cle):
 
         for item in items:
             try:
-                prix = float(item.get("price", 0))
+                prix_data = item.get("price", {})
+                prix = float(prix_data.get("amount", 0)) if isinstance(prix_data, dict) else float(prix_data or 0)
                 photo = item.get("photo", {})
                 image_url = photo.get("url", "") if photo else ""
-                
+
                 resultats.append({
                     "id": str(item["id"]),
                     "titre": item.get("title", ""),
@@ -137,7 +142,7 @@ def run_scraping():
         time.sleep(2)
 
     bonnes_affaires = sorted(bonnes_affaires_temp, key=lambda x: x["date"], reverse=True)[:50]
-    print(f"  → {nouvelles} nouvelles | {len(bonnes_affaires)} bonnes affaires")
+    print(f"  -> {nouvelles} nouvelles | {len(bonnes_affaires)} bonnes affaires")
 
 @app.route("/api/annonces")
 def get_annonces():
@@ -171,7 +176,8 @@ def manual_refresh():
     return jsonify({"status": "ok"})
 
 if __name__ == "__main__":
-    print("Knys VIP — Vinted Bot v2")
+    print("Knys VIP - Vinted Bot v3")
+    refresh_session()
     run_scraping()
     scheduler = BackgroundScheduler()
     scheduler.add_job(run_scraping, "interval", minutes=INTERVALLE_SCRAPING_MINUTES)
