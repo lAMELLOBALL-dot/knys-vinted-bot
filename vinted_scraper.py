@@ -28,38 +28,11 @@ SEUILS_BONNE_AFFAIRE = {
     "airpods": 60,
 }
 
-INTERVALLE_SCRAPING_MINUTES = 10
+INTERVALLE_SCRAPING_MINUTES = 15
 
 annonces_store = {}
 bonnes_affaires = []
 ids_vus = set()
-
-COOKIES = {
-    "anon_id": "ed318f89-2e7a-4ac2-ac2e-9b102e17151c",
-    "datadome": "OpqdQhpUI4GjrkKvbBv0EXS7nnVgbgXS6bmtiKMAeKgUkUWYQ3iXE8XULnM~9UV86ELavfLHW2AN5DnuBQBXNRU0p04G6aNKv~Z95VNE25fKZ~R7bWQT~l0BsO8N6TAl",
-    "user-locale": "fr",
-    "user-iso-locale": "fr-FR",
-    "_vinted_fr_session": "",
-}
-
-HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Accept": "application/json, text/plain, */*",
-    "Accept-Language": "fr-FR,fr;q=0.9",
-    "Referer": "https://www.vinted.fr/",
-    "X-Requested-With": "XMLHttpRequest",
-}
-
-session = requests.Session()
-session.headers.update(HEADERS)
-session.cookies.update(COOKIES)
-
-def refresh_session():
-    global session
-    try:
-        session.get("https://www.vinted.fr", timeout=10)
-    except:
-        pass
 
 def get_seuil(titre):
     titre_lower = titre.lower()
@@ -68,8 +41,26 @@ def get_seuil(titre):
             return seuil
     return SEUILS_BONNE_AFFAIRE["default"]
 
+def get_vinted_token():
+    """Récupère un token Vinted frais."""
+    try:
+        s = requests.Session()
+        s.headers.update({
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Accept": "text/html,application/xhtml+xml",
+            "Accept-Language": "fr-FR,fr;q=0.9",
+        })
+        r = s.get("https://www.vinted.fr", timeout=15, allow_redirects=True)
+        cookies = dict(s.cookies)
+        return s, cookies
+    except Exception as e:
+        print(f"Erreur token: {e}")
+        return requests.Session(), {}
+
+session, cookies_store = get_vinted_token()
+
 def scrape_vinted(mot_cle):
-    global session
+    global session, cookies_store
     resultats = []
     try:
         url = "https://www.vinted.fr/api/v2/catalog/items"
@@ -77,19 +68,37 @@ def scrape_vinted(mot_cle):
             "search_text": mot_cle,
             "order": "newest_first",
             "per_page": 20,
+            "currency": "EUR",
         }
-        resp = session.get(url, params=params, timeout=15)
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            "Accept": "application/json, text/plain, */*",
+            "Accept-Language": "fr-FR,fr;q=0.9,en;q=0.8",
+            "Referer": "https://www.vinted.fr/catalog",
+            "sec-ch-ua": '"Chromium";v="124", "Google Chrome";v="124"',
+            "sec-ch-ua-mobile": "?0",
+            "sec-ch-ua-platform": '"Windows"',
+            "sec-fetch-dest": "empty",
+            "sec-fetch-mode": "cors",
+            "sec-fetch-site": "same-origin",
+        }
+        resp = session.get(url, params=params, headers=headers, timeout=15)
+        print(f"[{mot_cle}] Status: {resp.status_code}")
 
-        if resp.status_code in [401, 403]:
-            refresh_session()
-            resp = session.get(url, params=params, timeout=15)
+        if resp.status_code in [401, 403, 429]:
+            print(f"[{mot_cle}] Renouvellement session...")
+            session, cookies_store = get_vinted_token()
+            time.sleep(3)
+            resp = session.get(url, params=params, headers=headers, timeout=15)
+            print(f"[{mot_cle}] Retry status: {resp.status_code}")
 
         if resp.status_code != 200:
-            print(f"[{mot_cle}] Erreur {resp.status_code}")
+            print(f"[{mot_cle}] Echec final: {resp.status_code} - {resp.text[:200]}")
             return []
 
         data = resp.json()
         items = data.get("items", [])
+        print(f"[{mot_cle}] {len(items)} items trouvés")
 
         for item in items:
             try:
@@ -112,11 +121,12 @@ def scrape_vinted(mot_cle):
                     "bonne_affaire": False,
                     "mot_cle": mot_cle,
                 })
-            except (KeyError, TypeError, ValueError):
+            except (KeyError, TypeError, ValueError) as e:
+                print(f"Erreur item: {e}")
                 continue
 
     except Exception as e:
-        print(f"[{mot_cle}] Erreur : {e}")
+        print(f"[{mot_cle}] Exception: {e}")
 
     return resultats
 
@@ -139,7 +149,7 @@ def run_scraping():
                 if item["bonne_affaire"]:
                     bonnes_affaires_temp.append(item)
                 nouvelles += 1
-        time.sleep(2)
+        time.sleep(3)
 
     bonnes_affaires = sorted(bonnes_affaires_temp, key=lambda x: x["date"], reverse=True)[:50]
     print(f"  -> {nouvelles} nouvelles | {len(bonnes_affaires)} bonnes affaires")
@@ -176,8 +186,7 @@ def manual_refresh():
     return jsonify({"status": "ok"})
 
 if __name__ == "__main__":
-    print("Knys VIP - Vinted Bot v3")
-    refresh_session()
+    print("Knys VIP - Vinted Bot v4")
     run_scraping()
     scheduler = BackgroundScheduler()
     scheduler.add_job(run_scraping, "interval", minutes=INTERVALLE_SCRAPING_MINUTES)
