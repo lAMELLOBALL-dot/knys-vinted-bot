@@ -30,7 +30,7 @@ SEUILS_BONNE_AFFAIRE = {
     "airpods": 60,
 }
 
-INTERVALLE_SCRAPING_MINUTES = 15
+INTERVALLE_SCRAPING_MINUTES = 60
 
 annonces_store = {}
 bonnes_affaires = []
